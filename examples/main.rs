@@ -40,7 +40,8 @@ fn main() {
     // Perform the decoding
     let mut result = None;
     while !packets.is_empty() {
-        result = decoder.decode(EncodingPacket::deserialize(&packets.pop().unwrap()));
+        result = decoder.decode(EncodingPacket::deserialize(&packets.pop().unwrap()))
+            .expect("decode");
         if result.is_some() {
             break;
         }

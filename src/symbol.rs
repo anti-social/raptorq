@@ -36,7 +36,6 @@ impl Symbol {
         }
     }
 
-    #[cfg(feature = "benchmarking")]
     pub fn len(&self) -> usize {
         self.value.len()
     }

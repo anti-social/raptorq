@@ -515,11 +515,14 @@ impl<T: BinaryMatrix> IntermediateSymbolDecoder<T> {
     }
 
     #[inline(never)]
-    fn apply_deferred_symbol_ops(&mut self) {
+    fn apply_deferred_symbol_ops(&mut self) -> Result<(), ()> {
         for op in self.deferred_D_ops.iter() {
             match op {
                 SymbolOps::AddAssign { dest, src } => {
                     let (dest, temp) = get_both_indices(&mut self.D, *dest, *src);
+                    if dest.len() != temp.len() {
+                        return Err(());
+                    }
                     *dest += temp;
                 }
                 SymbolOps::MulAssign { dest, scalar } => {
@@ -532,6 +535,7 @@ impl<T: BinaryMatrix> IntermediateSymbolDecoder<T> {
                 SymbolOps::Reorder { order: _order } => {}
             }
         }
+        Ok(())
     }
 
     // Returns true iff all elements in A between [start_row, end_row)
@@ -1274,7 +1278,7 @@ impl<T: BinaryMatrix> IntermediateSymbolDecoder<T> {
     }
 
     #[inline(never)]
-    pub fn execute(&mut self) -> (Option<Vec<Symbol>>, Option<Vec<SymbolOps>>) {
+    pub fn execute(&mut self) -> Result<(Option<Vec<Symbol>>, Option<Vec<SymbolOps>>), ()> {
         #[cfg(debug_assertions)]
         self.X.disable_column_access_acceleration();
 
@@ -1282,17 +1286,17 @@ impl<T: BinaryMatrix> IntermediateSymbolDecoder<T> {
             self.A.disable_column_access_acceleration();
 
             if !self.second_phase(&x_elimination_ops) {
-                return (None, None);
+                return Ok((None, None));
             }
 
             self.third_phase(&x_elimination_ops);
             self.fourth_phase();
             self.fifth_phase(&x_elimination_ops);
         } else {
-            return (None, None);
+            return Ok((None, None));
         }
 
-        self.apply_deferred_symbol_ops();
+        self.apply_deferred_symbol_ops()?;
 
         // See end of section 5.4.2.1
         let mut index_mapping = vec![0; self.L];
@@ -1318,7 +1322,7 @@ impl<T: BinaryMatrix> IntermediateSymbolDecoder<T> {
 
         let mut operation_vector = mem::take(&mut self.deferred_D_ops);
         operation_vector.push(SymbolOps::Reorder { order: reorder });
-        return (Some(result), Some(operation_vector));
+        return Ok((Some(result), Some(operation_vector)));
     }
 }
 
@@ -1329,7 +1333,7 @@ pub fn fused_inverse_mul_symbols<T: BinaryMatrix>(
     hdpc_rows: DenseOctetMatrix,
     symbols: Vec<Symbol>,
     num_source_symbols: u32,
-) -> (Option<Vec<Symbol>>, Option<Vec<SymbolOps>>) {
+) -> Result<(Option<Vec<Symbol>>, Option<Vec<SymbolOps>>), ()> {
     IntermediateSymbolDecoder::new(matrix, hdpc_rows, symbols, num_source_symbols).execute()
 }
 

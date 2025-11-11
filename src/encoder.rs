@@ -351,11 +351,11 @@ fn gen_intermediate_symbols(
     if extended_source_symbols >= sparse_threshold {
         let (A, hdpc) =
             generate_constraint_matrix::<SparseBinaryMatrix>(extended_source_symbols, &indices);
-        return fused_inverse_mul_symbols(A, hdpc, D, extended_source_symbols);
+        return fused_inverse_mul_symbols(A, hdpc, D, extended_source_symbols).unwrap();
     } else {
         let (A, hdpc) =
             generate_constraint_matrix::<DenseBinaryMatrix>(extended_source_symbols, &indices);
-        return fused_inverse_mul_symbols(A, hdpc, D, extended_source_symbols);
+        return fused_inverse_mul_symbols(A, hdpc, D, extended_source_symbols).unwrap();
     }
 }
 

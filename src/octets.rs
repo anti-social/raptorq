@@ -94,6 +94,7 @@ pub fn fused_addassign_mul_scalar_binary(
     );
 
     assert_eq!(octets.len(), other.len());
+
     #[cfg(all(any(target_arch = "x86", target_arch = "x86_64"), feature = "std"))]
     {
         if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("bmi1") {
@@ -801,7 +802,6 @@ unsafe fn add_assign_ssse3(octets: &mut [u8], other: &[u8]) {
         #[cfg(target_arch = "x86_64")]
         use std::arch::x86_64::*;
 
-        assert_eq!(octets.len(), other.len());
         let self_ssse_ptr = octets.as_mut_ptr();
         let other_ssse_ptr = other.as_ptr();
         for i in 0..(octets.len() / 16) {

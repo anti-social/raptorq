@@ -14,6 +14,13 @@ use crate::systematic_constants::{
 use crate::util::int_div_ceil;
 #[cfg(feature = "serde_support")]
 use serde::{Deserialize, Serialize};
+use snafu::Snafu;
+
+#[derive(Debug, Snafu)]
+pub enum Error {
+    #[snafu(display("Invalid packet to decode"))]
+    InvalidPacket,
+}
 
 // As defined in section 3.2
 #[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]

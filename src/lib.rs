@@ -40,6 +40,7 @@ mod systematic_constants;
 mod util;
 
 pub use crate::base::EncodingPacket;
+pub use crate::base::Error;
 pub use crate::base::ObjectTransmissionInformation;
 pub use crate::base::PayloadId;
 pub use crate::base::partition;

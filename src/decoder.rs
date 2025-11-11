@@ -8,6 +8,7 @@ use core::iter;
 use alloc::{collections::BTreeSet as Set, vec::Vec};
 
 use crate::base::EncodingPacket;
+use crate::base::Error;
 use crate::base::ObjectTransmissionInformation;
 use crate::base::intermediate_tuple;
 use crate::base::partition;
@@ -73,15 +74,19 @@ impl Decoder {
         }
     }
 
-    pub fn decode(&mut self, packet: EncodingPacket) -> Option<Vec<u8>> {
+    pub fn decode(&mut self, packet: EncodingPacket) -> Result<Option<Vec<u8>>, Error> {
         let block_number = packet.payload_id.source_block_number() as usize;
-        if self.blocks[block_number].is_none() {
-            self.blocks[block_number] =
-                self.block_decoders[block_number].decode(iter::once(packet));
+        if let Some(block) = self.blocks.get_mut(block_number) {
+            if block.is_none() {
+                *block = self.block_decoders[block_number].decode(iter::once(packet))?;
+            }
+        } else {
+            return Err(Error::InvalidPacket);
         }
+
         for block in self.blocks.iter() {
             if block.is_none() {
-                return None;
+                return Ok(None);
             }
         }
 
@@ -91,16 +96,20 @@ impl Decoder {
         }
 
         result.truncate(self.config.transfer_length() as usize);
-        Some(result)
+        Ok(Some(result))
     }
 
     #[cfg(not(feature = "python"))]
-    pub fn add_new_packet(&mut self, packet: EncodingPacket) {
+    pub fn add_new_packet(&mut self, packet: EncodingPacket) -> Result<(), Error> {
         let block_number = packet.payload_id.source_block_number() as usize;
-        if self.blocks[block_number].is_none() {
-            self.blocks[block_number] =
-                self.block_decoders[block_number].decode(iter::once(packet));
+        if let Some(block) = self.blocks.get_mut(block_number) {
+            if block.is_none() {
+                *block = self.block_decoders[block_number].decode(iter::once(packet))?;
+            }
+        } else {
+            return Err(Error::InvalidPacket);
         }
+        Ok(())
     }
 
     #[cfg(not(feature = "python"))]
@@ -191,14 +200,14 @@ impl SourceBlockDecoder {
         constraint_matrix: impl BinaryMatrix,
         hdpc_rows: DenseOctetMatrix,
         symbols: Vec<Symbol>,
-    ) -> Option<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>, Error> {
         let intermediate_symbols = match fused_inverse_mul_symbols(
             constraint_matrix,
             hdpc_rows,
             symbols,
             self.source_block_symbols,
-        ) {
-            (None, _) => return None,
+        ).map_err(|_| Error::InvalidPacket)? {
+            (None, _) => return Ok(None),
             (Some(s), _) => s,
         };
 
@@ -218,19 +227,19 @@ impl SourceBlockDecoder {
                     pi_symbols,
                     sys_index,
                     p1,
-                );
+                )?;
                 self.unpack_sub_blocks(&mut result, &rebuilt, i);
             }
         }
 
         self.decoded = true;
-        return Some(result);
+        return Ok(Some(result));
     }
 
     pub fn decode<T: IntoIterator<Item = EncodingPacket>>(
         &mut self,
         packets: T,
-    ) -> Option<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>, Error> {
         for packet in packets {
             assert_eq!(
                 self.source_block_id,
@@ -257,7 +266,7 @@ impl SourceBlockDecoder {
 
         // Case 1: the number of received packets is insufficient for decoding
         if self.received_esi.len() < self.source_block_symbols as usize {
-            return None;
+            return Ok(None);
         }
 
         // Case 2: we have all source symbols and can return them without decoding
@@ -269,7 +278,7 @@ impl SourceBlockDecoder {
             }
 
             self.decoded = true;
-            return Some(result);
+            return Ok(Some(result));
         }
 
         // Case 3: we may have sufficient symbols to do a standard decoding
@@ -322,14 +331,18 @@ impl SourceBlockDecoder {
         pi_symbols: u32,
         sys_index: u32,
         p1: u32,
-    ) -> Symbol {
+    ) -> Result<Symbol, Error> {
         let mut rebuilt = Symbol::zero(self.symbol_size);
         let tuple = intermediate_tuple(source_symbol_id, lt_symbols, sys_index, p1);
 
         for i in enc_indices(tuple, lt_symbols, pi_symbols, p1) {
-            rebuilt += &intermediate_symbols[i];
+            let add_symbols = &intermediate_symbols[i];
+            if rebuilt.len() != add_symbols.len() {
+                return Err(Error::InvalidPacket);
+            }
+            rebuilt += add_symbols;
         }
-        rebuilt
+        Ok(rebuilt)
     }
 }
 
@@ -354,8 +367,7 @@ mod codec_tests {
     #[cfg(not(feature = "python"))]
     use crate::{Encoder, EncoderBuilder};
     use crate::{
-        ObjectTransmissionInformation, SourceBlockDecoder, SourceBlockEncoder,
-        SourceBlockEncodingPlan,
+        ObjectTransmissionInformation, SourceBlockDecoder, SourceBlockEncoder, SourceBlockEncodingPlan
     };
 
     #[cfg(not(feature = "python"))]
@@ -394,7 +406,7 @@ mod codec_tests {
 
         let mut result = None;
         while !packets.is_empty() {
-            result = decoder.decode(packets.pop().unwrap());
+            result = decoder.decode(packets.pop().unwrap()).unwrap();
             if result.is_some() {
                 break;
             }
@@ -423,7 +435,7 @@ mod codec_tests {
         let mut result = None;
         for packet in encoder.get_encoded_packets(0) {
             assert_eq!(result, None);
-            result = decoder.decode(packet);
+            result = decoder.decode(packet).unwrap();
         }
         assert_eq!(result.unwrap(), data);
 
@@ -438,7 +450,7 @@ mod codec_tests {
 
         let mut result = None;
         while !packets.is_empty() {
-            result = decoder.decode(packets.pop().unwrap());
+            result = decoder.decode(packets.pop().unwrap()).unwrap();
             if result.is_some() {
                 break;
             }
@@ -491,7 +503,7 @@ mod codec_tests {
             let mut result = None;
             for packet in encoder.source_packets() {
                 assert_eq!(result, None);
-                result = decoder.decode(iter::once(packet));
+                result = decoder.decode(iter::once(packet)).unwrap();
             }
 
             assert_eq!(result.unwrap(), data);
@@ -554,6 +566,40 @@ mod codec_tests {
         }
     }
 
+    #[test]
+    fn invalid_packet() {
+        let mut data1 = vec!(0; 130);
+        for i in 0..data1.len() {
+            data1[i] = i as u8;
+        }
+        let mut data2 = vec!(0; 100);
+        for i in 0..data2.len() {
+            let ix = data2.len() - i - 1;
+            data2[ix] = i as u8;
+        }
+
+        let encoder1 = Encoder::with_defaults(&data1, 24);
+        let packets1 = encoder1.get_encoded_packets(2);
+
+        let encoder2 = Encoder::with_defaults(&data2, 13);
+        let packets2 = encoder2.get_encoded_packets(4);
+
+        let mut packets = vec!();
+        packets.extend(packets1.iter());
+        packets.extend(packets2.iter());
+
+        use rand::seq::SliceRandom;
+        let mut rng = rand::rng();
+        packets.shuffle(&mut rng);
+
+        let config = ObjectTransmissionInformation::with_defaults(100, 13);
+        let mut decoder = Decoder::new(config);
+        for pkt in packets.into_iter() {
+            // Error is ok but panic is not
+            let _ = decoder.decode(pkt.clone());
+        }
+    }
+
     fn repair(sparse_threshold: u32, max_symbols: usize, progress: bool, pre_plan: bool) {
         let pool = threadpool::Builder::new().build();
         let failed = Arc::new(AtomicU32::new(0));
@@ -607,7 +653,7 @@ mod codec_tests {
             if parsed_packets < elements / symbol_size && result.is_some() {
                 return false;
             }
-            result = decoder.decode(iter::once(packet));
+            result = decoder.decode(iter::once(packet)).unwrap();
         }
 
         return result.unwrap() == data;
